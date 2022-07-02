@@ -1,0 +1,37 @@
+#!/bin/bash
+# Parse tamilradios.com and generate m3u playlists
+
+tamilradios_base_url='https://www.tamilradios.com'
+temp_out_html='/tmp/out.html'
+temp_href_file='/tmp/href_list'
+genres_xpath='/html/body/div/div'
+wget -O $temp_out_html "$tamilradios_base_url"
+
+top_playlist_items_xpath='/html/body/section[1]/div/div/div'
+not_playlist_items_xpath='/html/body/section/div/div/div[2]'
+
+generate_playlist(){
+	printf "top\n" > playlist_items
+	echo "cat $genres_xpath" | xmllint --html --shell $temp_out_html 2>/dev/null | grep -oP '(?<=href=").[0-9a-zA-z-/]*(?=")' | sed -e '2,2d'  >> playlist_items
+}
+
+generate_playlist
+cat playlist_items | while read playlist; do
+	m3u_file_name=$(basename $playlist)
+	if [[ $playlist == 'top' ]]
+	then
+		grid_xpath=$top_playlist_items_xpath
+		uri_path=''
+		grep_pattern='(?<=href=").[0-9a-zA-z-]*(?=")'
+	else
+		grid_path=$not_playlist_items_xpath
+		uri_path=$playlist
+		grep_pattern='(?<=href="\.\./).[a-zA-z0-9-]*(?=")'
+	fi
+	rm $temp_out_html
+	wget -O $temp_out_html  "$tamilradios_base_url/$uri_path"
+
+	echo "cat $grid_xpath" | xmllint --html --shell $temp_out_html 2>/dev/null | grep -oP $grep_pattern > $temp_href_file
+	paste -d',' <(cat $temp_href_file) <(cat $temp_href_file | parallel -j4 curl -s https://www.tamilradios.com/{} | grep -oP '(?<=<source src=").*(?=")') > $m3u_file_name.csv
+	genm3u $m3u_file_name.csv
+done
